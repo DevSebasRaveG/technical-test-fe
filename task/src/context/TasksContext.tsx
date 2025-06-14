@@ -7,10 +7,10 @@ import {
   ReactNode,
   useEffect,
 } from "react";
-import { Task, TaskAction, TaskState } from "../types/task";
-import { tasksReducer, initialState } from "../reducers/tasksReducer";
-import { WebSocketService } from "../services/websocket";
-import { TasksAPI } from "../services/api";
+import { Task, TaskAction, TaskState } from "app/types/task";
+import { tasksReducer, initialState } from "app/reducers/tasksReducer";
+// import { WebSocketService } from "app/services/websocket";
+import { TasksAPI } from "app/services/api";
 
 type TasksContextType = {
   state: TaskState;
@@ -21,7 +21,7 @@ const TasksContext = createContext<TasksContextType | undefined>(undefined);
 
 export function TasksProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(tasksReducer, initialState);
-  const wsService = WebSocketService.getInstance();
+  // const wsService = WebSocketService.getInstance();
 
   useEffect(() => {
     // Cargar tareas iniciales
@@ -37,14 +37,14 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     loadTasks();
 
     // Configurar WebSocket para nuevas tareas
-    wsService.onNewTask((task: Task) => {
-      dispatch({ type: "ADD_TASK", payload: task });
-    });
-
-    return () => {
-      wsService.disconnect();
-    };
-  }, [wsService]);
+    // wsService.onNewTask((task: Task) => {
+    //   dispatch({ type: "ADD_TASK", payload: task });
+    // });
+    //
+    // return () => {
+    //   wsService.disconnect();
+    // };
+  }, []);
 
   return (
     <TasksContext.Provider value={{ state, dispatch }}>
@@ -72,7 +72,7 @@ export const addTask = async (
 
     if (newTask) {
       // Emitir al WebSocket para notificar a otros clientes
-      WebSocketService.getInstance().emitNewTask(newTask);
+      // WebSocketService.getInstance().emitNewTask(newTask);
 
       // Actualizar estado local
       dispatch({ type: "ADD_TASK", payload: newTask });

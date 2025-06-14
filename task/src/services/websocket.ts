@@ -1,12 +1,16 @@
-import { Socket, io } from "socket.io-client";
 import { Task } from "../types/task";
 
 const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL;
 
 export class WebSocketService {
   private static instance: WebSocketService;
-  private socket: Socket;
+  private socket: WebSocket | null = null;
   private onNewTaskCallback: ((task: Task) => void) | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private isConnecting = false;
 
   private constructor() {
     if (!WEBSOCKET_URL) {
@@ -14,16 +18,7 @@ export class WebSocketService {
       throw new Error("WebSocket URL is not configured");
     }
 
-    this.socket = io(WEBSOCKET_URL, {
-      transports: ["websocket", "polling"],
-      autoConnect: true,
-      timeout: 20000,
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
-    });
-
-    this.setupListeners();
+    this.connectWebSocket();
   }
 
   public static getInstance(): WebSocketService {
@@ -33,29 +28,82 @@ export class WebSocketService {
     return WebSocketService.instance;
   }
 
-  private setupListeners(): void {
-    this.socket.on("connect", () => {
-      console.log("Connected to WebSocket server");
-    });
+  private connectWebSocket(): void {
+    console.log("se esta conectando");
+    if (this.isConnecting || !WEBSOCKET_URL) return;
+    this.isConnecting = true;
 
-    this.socket.on("disconnect", () => {
-      console.log("Disconnected from WebSocket server");
-    });
+    try {
+      this.socket = new WebSocket(WEBSOCKET_URL);
 
-    this.socket.on("newTask", (task: Task) => {
-      console.log("New task received:", task);
-      if (this.onNewTaskCallback) {
-        this.onNewTaskCallback(task);
-      }
-    });
+      this.socket.onopen = () => {
+        console.log("✅ Connected to WebSocket server");
+        this.reconnectAttempts = 0;
+        this.isConnecting = false;
+      };
 
-    this.socket.on("error", (error: Error) => {
-      console.error("WebSocket error:", error);
-    });
+      this.socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("📥 Message received:", data);
+
+          if (data?.type === "newTask" && data.task) {
+            if (this.onNewTaskCallback) {
+              this.onNewTaskCallback(data.task);
+            }
+          }
+        } catch (error) {
+          console.error("❌ Error parsing message:", event.data);
+        }
+      };
+
+      this.socket.onclose = (event) => {
+        console.warn("⚠️ Disconnected:", event.reason);
+        this.isConnecting = false;
+        this.handleReconnect();
+      };
+
+      this.socket.onerror = (event) => {
+        console.error("❌ WebSocket error:", event);
+        this.isConnecting = false;
+        this.handleReconnect();
+      };
+    } catch (error) {
+      console.error("❌ WebSocket connection error:", error);
+      this.handleReconnect();
+    }
+  }
+
+  private handleReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error("🛑 Max reconnection attempts reached");
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * this.reconnectAttempts;
+
+    console.log(
+      `🔁 Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+    );
+
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+
+    this.reconnectTimeout = setTimeout(() => {
+      this.connectWebSocket();
+    }, delay);
   }
 
   public emitNewTask(task: Task): void {
-    this.socket.emit("createTask", task);
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      const message = JSON.stringify({ type: "createTask", task });
+      this.socket.send(message);
+      console.log("📤 Task sent:", message);
+    } else {
+      console.error(
+        `🚫 Cannot send, WebSocket not connected (readyState=${this.socket?.readyState})`,
+      );
+    }
   }
 
   public onNewTask(callback: (task: Task) => void): void {
@@ -64,7 +112,13 @@ export class WebSocketService {
 
   public disconnect(): void {
     if (this.socket) {
-      this.socket.disconnect();
+      this.socket.close();
+      this.socket = null;
+    }
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
   }
 }
